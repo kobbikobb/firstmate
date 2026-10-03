@@ -19,6 +19,8 @@ _FM_AGENT_PROCESS_LIB_DIR=${BASH_SOURCE[0]%/*}
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-session-lock-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-gemini-lib.sh"
+# shellcheck source=bin/fm-copilot-lib.sh
+. "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-copilot-lib.sh"
 unset _FM_AGENT_PROCESS_LIB_DIR
 
 # fm_agent_process_classify_name: the single owner of the process-name
@@ -51,6 +53,13 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
     # way (verified, devin 3000.11.1: comm=devin), so a `*devin*` glob never
     # claims an unrelated command.
     agy|devin) printf 'agent' ;;
+    # copilot (GitHub Copilot CLI) is anchored for the same reason: its native
+    # binary is literally named `copilot` (verified, copilot 1.0.88: the
+    # darwin-arm64 child carries basename copilot), and a glob would claim
+    # unrelated commands containing that fragment. The node loader shim
+    # (comm=node) never matches here; it is reached through the structural
+    # argv rule in bin/fm-copilot-lib.sh below instead.
+    copilot) printf 'agent' ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'shell' ;;
     *)
       if fm_harness_path_name "$path" >/dev/null || fm_harness_path_name "$argv0" >/dev/null; then
@@ -85,9 +94,10 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
 #   <argv0>  argv[0] as the process reports it - a bare name or an install
 #            path, whichever the launcher used (empty when unknown).
 #   <args>   the flattened command line, read only for the node-bundle
-#            harnesses whose identity sits in argv[1] (bin/fm-gemini-lib.sh).
-#   [pid]    when given, lets the Gemini rule read argv boundaries from the
-#            live process instead of the flattened line.
+#            harnesses whose identity sits in argv[1] (bin/fm-gemini-lib.sh,
+#            bin/fm-copilot-lib.sh).
+#   [pid]    when given, lets the Gemini and Copilot rules read argv
+#            boundaries from the live process instead of the flattened line.
 fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|other
   local name=${1:-} argv0=${2:-} args=${3:-} pid=${4:-} by_name by_argv0
   by_name=$(fm_agent_process_classify_name "$name" "$argv0")
@@ -104,7 +114,15 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
     printf 'agent'
     return 0
   fi
+  if [ -n "$pid" ] && fm_copilot_pid_is_copilot "$pid"; then
+    printf 'agent'
+    return 0
+  fi
   if [ -n "$args" ] && fm_gemini_args_are_gemini "$args"; then
+    printf 'agent'
+    return 0
+  fi
+  if [ -n "$args" ] && fm_copilot_args_are_copilot "$args"; then
     printf 'agent'
     return 0
   fi
